@@ -145,7 +145,10 @@ func (obj *Object) parse(ctx *oscript.Context) (*Object, error) {
 									f.ORM.RelationField = &Field{
 										Name: object.PrimaryKeys[0].Name,
 										Type: object.PrimaryKeys[0].Type,
-										Tags: Tag{"gorm:\"column:" + object.PrimaryKeys[0].ORM.DBName + "\"", "json:\"" + object.PrimaryKeys[0].Json + "\""},
+										Tags: Tags{
+											{"gorm", "column:" + object.PrimaryKeys[0].ORM.DBName},
+											{"json", object.PrimaryKeys[0].Json},
+										},
 									}
 									if !array {
 										obj.Fields = append(obj.Fields, *f.ORM.RelationField)
@@ -167,10 +170,10 @@ func (obj *Object) parse(ctx *oscript.Context) (*Object, error) {
 			}
 
 			if obj.IsModel && !skipModel {
-				f.Tags = append(f.Tags, f.ORM.ToString())
+				f.Tags = append(f.Tags, f.ORM.ToTag())
 			}
 
-			f.Tags = append(f.Tags, "json:\""+f.Json+"\"")
+			f.Tags = append(f.Tags, Tag{Name: "json", Value: f.Json})
 			obj.Fields = append(obj.Fields, f)
 			if f.ORM.PrimaryKey {
 				obj.PrimaryKeys = append(obj.PrimaryKeys, &f)
@@ -211,7 +214,7 @@ func (obj *Object) getModelStatement(ctx *oscript.Context) []generator.Statement
 type Field struct {
 	Name     string
 	Type     string
-	Tags     Tag
+	Tags     Tags
 	Json     string
 	ORM      ORM
 	Nullable bool
@@ -239,31 +242,34 @@ type ORM struct {
 	Comment       string
 }
 
-func (o ORM) ToString() string {
-	var tag = "gorm:\""
+func (o ORM) ToTag() Tag {
+	var tag = Tag{Name: "gorm", Value: ""}
 	if o.Skip {
-		return tag + "-\""
+		tag.Value = "-"
+		return tag
 	}
 
 	if o.RelationType != "" {
 		if o.RelationType == "has-one" {
-			return tag + "foreignKey:" + o.Relation.PrimaryKeys[0].Name + ";references:" + o.RelationField.Name + ";\""
+			tag.Value = "foreignKey:" + o.Relation.PrimaryKeys[0].Name + ";references:" + o.RelationField.Name + ";"
+		} else {
+			tag.Value = "foreignKey:" + o.Relation.PrimaryKeys[0].Name
 		}
-		return tag + "foreignKey:" + o.Relation.PrimaryKeys[0].Name + "\""
+		return tag
 	}
 
-	tag += "column:" + o.DBName + ";"
+	tag.Value += "column:" + o.DBName + ";"
 	if o.Comment != "" {
-		tag += "comment:" + o.Comment + ";"
+		tag.Value += "comment:" + o.Comment + ";"
 	}
 	if o.Size != "" {
-		tag += "size:" + o.Size + ";"
+		tag.Value += "size:" + o.Size + ";"
 	}
 	if o.Precision != "" {
-		tag += "precision:" + o.Precision + ";"
+		tag.Value += "precision:" + o.Precision + ";"
 	}
 	if o.Constraint != "" {
-		tag += "constrain:" + o.Constraint + ";"
+		tag.Value += "constrain:" + o.Constraint + ";"
 	}
 	if o.Type != "" {
 		if o.Type == "enum" {
@@ -271,47 +277,55 @@ func (o ORM) ToString() string {
 			for idx, v := range enums {
 				enums[idx] = singleQuote(v)
 			}
-			tag += "type:enum(" + strings.Join(enums, ",") + ");"
+			tag.Value += "type:enum(" + strings.Join(enums, ",") + ");"
 		} else {
 			if o.Size != "" {
-				tag += "type:" + o.Type + "(" + o.Size + ")" + ";"
+				tag.Value += "type:" + o.Type + "(" + o.Size + ")" + ";"
 			} else {
-				tag += "type:" + o.Type + ";"
+				tag.Value += "type:" + o.Type + ";"
 			}
 
 		}
 	}
 	if o.Default != "" {
-		tag += "default:" + o.Default + ";"
+		tag.Value += "default:" + o.Default + ";"
 	}
 	if o.UniqueIndex != "" {
-		tag += "uniqueIndex:" + o.UniqueIndex + ";"
+		tag.Value += "uniqueIndex:" + o.UniqueIndex + ";"
 	}
 	if o.SelfIndex {
-		tag += "index;"
+		tag.Value += "index;"
 	}
 	if o.SelfUnique {
-		tag += "unique;"
+		tag.Value += "unique;"
 	}
 	if !o.Nullable {
-		tag += "not null;"
+		tag.Value += "not null;"
 	}
 	if o.PrimaryKey {
-		tag += "primaryKey;"
+		tag.Value += "primaryKey;"
 	}
 	if o.AutoIncrement {
-		tag += "autoIncrement;"
+		tag.Value += "autoIncrement;"
 	}
 	for _, index := range o.Index {
-		tag += "index:" + index + ";"
+		tag.Value += "index:" + index + ";"
 	}
-	return tag + "\""
+	return tag
 }
 
-type Tag []string
+type Tag struct {
+	Name  string
+	Value string
+}
+type Tags []Tag
 
-func (t Tag) ToString() string {
-	return strings.Join(t, " ")
+func (t Tags) ToString() string {
+	var output = ""
+	for _, item := range t {
+		output += item.Name + ":\"" + item.Value + "\"  "
+	}
+	return strings.TrimSpace(output)
 }
 
 func (ns Namespace) GetObject(name string) *Object {

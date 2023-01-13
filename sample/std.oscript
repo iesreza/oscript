@@ -1,0 +1,10 @@
+prefix  prefix_
+std {
+    ${Slug}ID  uint autoIncrement  primaryKey
+    CreatedBy varchar(255)
+    CreatedAt date default:now
+    UpdatedAt date default:now onupdate:now
+    DeletedAt date index:deleted_at null
+    GeoRuleID uint default:1
+    Status    enum:'Draft',Published,Unpublished,Archived
+}

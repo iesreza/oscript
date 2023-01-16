@@ -25,6 +25,10 @@ type Object struct {
 }
 
 func (obj *Object) parse(ctx *oscript.Context) (*Object, error) {
+	obj.TableName = ctx.GetSingleValue("Table")
+	if obj.TableName == "" {
+		obj.TableName = strcase.ToSnake(obj.Name)
+	}
 	if ok, fields := ctx.GetChild("Fields"); ok {
 
 		for _, field := range fields.VaryDict {
@@ -32,7 +36,7 @@ func (obj *Object) parse(ctx *oscript.Context) (*Object, error) {
 				ORM: ORM{},
 			}
 			var skipModel = false
-			f.Name = field.Key
+			f.Name = strcase.ToCamel(field.Key)
 			if strings.Contains(f.Name, "*") {
 				f.Nullable = true
 			}
@@ -142,17 +146,22 @@ func (obj *Object) parse(ctx *oscript.Context) (*Object, error) {
 										f.ORM.Nullable = true
 										f.ORM.Constraint += "OnUpdate:CASCADE,OnDelete:SET NULL;"
 									}
+									f.ORM.Field = &f
+									f.ORM.Object = obj
 									f.ORM.RelationField = &Field{
 										Name: object.PrimaryKeys[0].Name,
 										Type: object.PrimaryKeys[0].Type,
 										Tags: Tags{
-											{"gorm", "column:" + object.PrimaryKeys[0].ORM.DBName},
+											//{"gorm", "column:" + object.PrimaryKeys[0].ORM.DBName},
 											{"json", object.PrimaryKeys[0].Json},
 										},
+										ORM: ORM{
+											DBName: object.PrimaryKeys[0].ORM.DBName,
+										},
 									}
-									if !array {
+									/*if !array {
 										obj.Fields = append(obj.Fields, *f.ORM.RelationField)
-									}
+									}*/
 									f.ORM.RelationType = "has-one"
 									if array {
 										f.ORM.RelationType = "has-many"
@@ -174,6 +183,17 @@ func (obj *Object) parse(ctx *oscript.Context) (*Object, error) {
 			}
 
 			f.Tags = append(f.Tags, Tag{Name: "json", Value: f.Json})
+
+			if f.ORM.RelationType == "has-one" {
+				f.ORM.RelationField.ORM.Index = f.ORM.Index
+				f.ORM.RelationField.ORM.SelfIndex = f.ORM.SelfIndex
+				f.ORM.RelationField.ORM.SelfUnique = f.ORM.SelfUnique
+				f.ORM.RelationField.ORM.Index = f.ORM.Index
+				f.ORM.RelationField.ORM.Nullable = f.ORM.Nullable
+				f.ORM.RelationField.Tags = append(f.ORM.RelationField.Tags, f.ORM.RelationField.ORM.ToTag())
+				obj.Fields = append(obj.Fields, *f.ORM.RelationField)
+			}
+
 			obj.Fields = append(obj.Fields, f)
 			if f.ORM.PrimaryKey {
 				obj.PrimaryKeys = append(obj.PrimaryKeys, &f)
@@ -199,15 +219,15 @@ func (obj *Object) getModelStatement(ctx *oscript.Context) []generator.Statement
 		result = append(result, generator.NewComment(ctx.Name+" "+description))
 	}
 	result = append(result, st)
-	if table := ctx.GetSingleValue("Table"); table != "" {
-		var tableName = generator.NewFunc(
-			generator.NewFuncReceiver("this", ctx.Name),
-			generator.NewFuncSignature("TableName").
-				ReturnTypeStatements(generator.NewFuncReturnType("string")),
-			generator.NewRawStatement("return \""+table+"\""),
-		)
-		result = append(result, tableName)
-	}
+
+	var tableName = generator.NewFunc(
+		generator.NewFuncReceiver("this", ctx.Name),
+		generator.NewFuncSignature("TableName").
+			ReturnTypeStatements(generator.NewFuncReturnType("string")),
+		generator.NewRawStatement("return \""+obj.TableName+"\""),
+	)
+	result = append(result, tableName)
+
 	return result
 }
 
@@ -228,6 +248,8 @@ type ORM struct {
 	Relation      *Object
 	RelationType  string
 	RelationField *Field
+	Field         *Field
+	Object        *Object
 	Nullable      bool
 	Default       string
 	Precision     string
@@ -251,9 +273,21 @@ func (o ORM) ToTag() Tag {
 
 	if o.RelationType != "" {
 		if o.RelationType == "has-one" {
-			tag.Value = "foreignKey:" + o.Relation.PrimaryKeys[0].Name + ";references:" + o.RelationField.Name + ";"
-		} else {
-			tag.Value = "foreignKey:" + o.Relation.PrimaryKeys[0].Name
+			//tag.Value = "foreignKey:" + o.RelationField.Name + ";references:" + o.Relation.PrimaryKeys[0].Name
+		} else if o.RelationType == "has-many" {
+			var hasMany = false
+			for _, item := range o.Relation.Fields {
+				if item.Name == o.Object.PrimaryKeys[0].Name {
+					tag.Value = "foreignKey:" + item.Name
+					hasMany = true
+					break
+				}
+			}
+			if !hasMany {
+				//many2many
+				tag.Value = "many2many:" + o.Object.TableName + "_" + o.Relation.TableName + ";"
+			}
+
 		}
 		return tag
 	}

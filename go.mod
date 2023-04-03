@@ -1,4 +1,4 @@
-module ies/oscript
+module github.com/iesreza/oscript
 
 go 1.17
 
